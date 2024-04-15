@@ -185,6 +185,29 @@ def GenerateFakeWGKey():
     public_key = base64.b64encode(key).decode('utf-8')
     return public_key
 
+def StartTransmissionSession(url):
+    if not url:
+        raise ValueError("No transmission configured")
+    try:
+        r = requests.get(f"{url}/rpc")
+        if r.status_code == 401:
+            raise ValueError("unauthorized")
+        return r
+    except ValueError as e:
+        raise ValueError(f"GET Request: Failed {str(e)}")
+
+def UpdateTransmissionPort(url, session, port):
+    if not url:
+        raise ValueError("No transmission configured")
+    try:
+        headers = {'content-type': 'application/json',
+        'X-Transmission-Session-Id': str(session.headers['X-Transmission-Session-Id'])}
+        transmissionObj = {'arguments': {'peer-port': int(port)}, 'method': 'session-set'}
+        r = requests.post(f'{url}/rpc', data=json.dumps(transmissionObj), headers=headers)
+        if r.status_code != 200:
+            raise ValueError("not ok")
+    except ValueError as e:
+        raise ValueError(f"POST request: Failed {str(e)}")
 
 # Function for DNS override taken from https://stackoverflow.com/a/60751327/3927406
 dns_cache = {}
@@ -328,6 +351,10 @@ except ValueError as e:
 logger.debug("Creating/Populating Wireguard Instances array")
 wireguardInstances = json.loads(request.text)['rows']
 instances_array = []
+try:
+    tr_session = StartTransmissionSession(config['transmissionURL'])
+except ValueError as e:
+    logger.error(f"No Transmission specified {str(e)}")
 for instance_name in config.get('instances', {}):
     logger.debug(f"Setting up python script for instance {instance_name}")  
     instance_obj = Instance(config, instance_name)
@@ -897,6 +924,10 @@ for instance_obj in instances_array:
         with open(instance_obj.WebPortFile(), 'w') as filetowrite:
             filetowrite.write(str(payloadInfo['port']))
             logger.debug(f"Saved port number to {instance_obj.WebPortFile()}")
+            try:
+                UpdateTransmissionPort(config['transmissionURL'], tr_session, payloadInfo['port'])
+            except ValueError as e:
+                logger.error(f"Failed to set transmission port {str(e)}")
         # written port to file
     
     # The requested port has a timer that needs to be refresh so you can keep the port active.
